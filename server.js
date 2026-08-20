@@ -5731,9 +5731,12 @@ app.get('/', (req, res) => {
 // =====================================================
 
 if (require.main === module) {
-  server.listen(PORT, () => {
-    console.log(`Okey 101 server: http://localhost:${PORT}`)
+  const PORT = process.env.PORT || 3000
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`)
   })
+
 }
 
 // Saf kural fonksiyonlarını test edebilmek için export ediyoruz.

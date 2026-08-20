@@ -6,38 +6,15 @@ const path = require('path')
 const Module = require('module')
 
 function loadServerInternals() {
-  const serverPath = path.join(__dirname, 'server.js')
-  const source = fs.readFileSync(serverPath, 'utf8')
-  const appendix = `
-module.exports.__botTest = {
-  SEATS,
-  players,
-  createGame,
-  createPlayerState,
-  getJokerInfo,
-  validateMeld,
-  validatePair,
-  createTableMeld,
-  getBotRules,
-  getBotContext,
-  runBotTableActions,
-  executeBotTableAction,
-  botCanTakeDiscard,
-  botDiscard,
-  attemptLayoff,
-  allPlayersOpenedPairs,
-  setGame(value) { game = value },
-  getGame() { return game },
-  botV1,
+  const { createTableRuntime } = require('./table-engine')
+  const noopTarget = { emit() {} }
+  const runtime = createTableRuntime({
+    to() { return noopTarget },
+    sockets: { sockets: new Map() },
+  }, '__bot-test__')
+  return runtime.__botTest
 }
-`
 
-  const mod = new Module(serverPath, module)
-  mod.filename = serverPath
-  mod.paths = Module._nodeModulePaths(path.dirname(serverPath))
-  mod._compile(source + appendix, serverPath)
-  return mod.exports.__botTest
-}
 
 const T = loadServerInternals()
 let tileCounter = 1000

@@ -346,6 +346,52 @@ test('V2 yandan alma: açılmış olsa bile yalnız bu tur kullanabileceği taş
   assert.strictEqual(T.botV2.canUsePickup(T.getBotContext(bot), dead), false)
 })
 
+
+test('V2 yüksek discard güvenliği: açmamış rakibe ölü 10 yerine ölü 4 atıyor', () => {
+  const { bot, right, game } = setup()
+  right.opened = false
+  game.stock = Array(20).fill(null)
+  bot.hand = [
+    normal('red', 4, 1, 'v2-safe-dead-4'),
+    normal('blue', 10, 1, 'v2-danger-dead-10'),
+  ]
+
+  const discard = T.botV2.chooseDiscard(T.getBotContext(bot))
+  assert(discard)
+  assert.strictEqual(discard.id, 'v2-safe-dead-4')
+})
+
+test('V2 yüksek discard güvenliği: tamamlanmış düşük runı sırf yüksek taşı korumak için bozmuyor', () => {
+  const { bot, right, game } = setup()
+  right.opened = false
+  game.stock = Array(20).fill(null)
+  bot.hand = [
+    normal('yellow', 2, 1, 'v2-run-2'),
+    normal('yellow', 3, 1, 'v2-run-3'),
+    normal('yellow', 4, 1, 'v2-run-4'),
+    normal('blue', 10, 1, 'v2-dead-10'),
+  ]
+
+  const discard = T.botV2.chooseDiscard(T.getBotContext(bot))
+  assert(discard)
+  assert.strictEqual(discard.id, 'v2-dead-10')
+})
+
+test('V2 yüksek discard güvenliği: sıradaki rakip açtıysa 10u gereksiz korumuyor', () => {
+  const { bot, right, game } = setup()
+  right.opened = true
+  right.openType = 'normal'
+  game.stock = Array(20).fill(null)
+  bot.hand = [
+    normal('red', 4, 1, 'v2-opened-4'),
+    normal('blue', 10, 1, 'v2-opened-10'),
+  ]
+
+  const discard = T.botV2.chooseDiscard(T.getBotContext(bot))
+  assert(discard)
+  assert.strictEqual(discard.id, 'v2-opened-10')
+})
+
 let passed = 0
 const failures = []
 for (const { name, fn } of tests) {

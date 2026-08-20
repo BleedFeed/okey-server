@@ -603,11 +603,14 @@ function chooseDiscard(context) {
   if (!hand.length) return null
   if (hand.length === 1) return hand[0]
 
+  const completeMeldIds = botV1.completeMeldTileIds(hand, context.rules)
   const ranked = hand.map(tile => {
+    const sourcePenaltyRisk = botV1.highDiscardSourcePenaltyRisk(tile, context)
     let keepScore = botV1.structuralKeepScore(tile, hand, context.rules)
-    keepScore += botV1.highDiscardSourcePenaltyRisk(tile, context)
+    keepScore += sourcePenaltyRisk
     keepScore += availabilitySupportScore(tile, context)
     keepScore += opponentNearMeldRisk(tile, context)
+    if (completeMeldIds.has(tile.id)) keepScore += 180
 
     const canLayoff = (context.tableMelds || []).some(
       meld => context.rules.previewLayoff(meld, tile)
@@ -627,13 +630,22 @@ function chooseDiscard(context) {
     return {
       tile,
       keepScore,
+      sourcePenaltyRisk,
       penaltyValue: Number(context.rules.tilePenaltyValue?.(tile)) || 0,
     }
   })
 
   ranked.sort((a, b) => {
     if (a.keepScore !== b.keepScore) return a.keepScore - b.keepScore
-    if (b.penaltyValue !== a.penaltyValue) return b.penaltyValue - a.penaltyValue
+    if (a.sourcePenaltyRisk !== b.sourcePenaltyRisk) {
+      return a.sourcePenaltyRisk - b.sourcePenaltyRisk
+    }
+    if (a.sourcePenaltyRisk > 0 && b.sourcePenaltyRisk > 0) {
+      if (a.penaltyValue !== b.penaltyValue) return a.penaltyValue - b.penaltyValue
+    }
+    else if (b.penaltyValue !== a.penaltyValue) {
+      return b.penaltyValue - a.penaltyValue
+    }
     return compareTile(a.tile, b.tile)
   })
   return ranked[0]?.tile || null

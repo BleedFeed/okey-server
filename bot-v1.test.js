@@ -705,6 +705,134 @@ test('V1 discard koruması: okey yerine konabilecek doğal taşı işlek diye ko
   assert.notStrictEqual(discard.id, replacement.id)
 })
 
+
+test('V1 yüksek discard güvenliği: açmamış rakibe ölü 10 yerine ölü 4 atıyor', () => {
+  const { bot, right, game } = setup()
+  game.stock = Array(20).fill(null)
+  right.opened = false
+  bot.hand = [
+    normal('red', 4, 1, 'safe-dead-4'),
+    normal('blue', 10, 1, 'danger-dead-10'),
+  ]
+
+  const discard = T.botV1.chooseDiscard(T.getBotContext(bot))
+  assert(discard)
+  assert.strictEqual(discard.id, 'safe-dead-4')
+})
+
+test('V1 yüksek discard güvenliği: 8 de riskli, ölü 6 varken 8 servis etmiyor', () => {
+  const { bot, right, game } = setup()
+  game.stock = Array(20).fill(null)
+  right.opened = false
+  bot.hand = [
+    normal('yellow', 6, 1, 'safe-dead-6'),
+    normal('black', 8, 1, 'danger-dead-8'),
+  ]
+
+  const discard = T.botV1.chooseDiscard(T.getBotContext(bot))
+  assert(discard)
+  assert.strictEqual(discard.id, 'safe-dead-6')
+})
+
+test('V1 yüksek discard güvenliği: tamamlanmış düşük peri bozmak yerine ölü 10u atabiliyor', () => {
+  const { bot, right, game } = setup()
+  game.stock = Array(20).fill(null)
+  right.opened = false
+  bot.hand = [
+    normal('red', 2, 1, 'run-2'),
+    normal('red', 3, 1, 'run-3'),
+    normal('red', 4, 1, 'run-4'),
+    normal('blue', 10, 1, 'dead-10-outside-run'),
+  ]
+
+  const discard = T.botV1.chooseDiscard(T.getBotContext(bot))
+  assert(discard)
+  assert.strictEqual(discard.id, 'dead-10-outside-run')
+})
+
+test('V1 yüksek discard güvenliği: rakip zaten açtıysa kaynak x10 korkusuyla 10u gereksiz tutmuyor', () => {
+  const { bot, right, game } = setup()
+  game.stock = Array(20).fill(null)
+  right.opened = true
+  right.openType = 'normal'
+  bot.hand = [
+    normal('red', 4, 1, 'opened-safe-4'),
+    normal('blue', 10, 1, 'opened-dead-10'),
+  ]
+
+  const discard = T.botV1.chooseDiscard(T.getBotContext(bot))
+  assert(discard)
+  assert.strictEqual(discard.id, 'opened-dead-10')
+})
+
+test('V1 yüksek discard güvenliği: balya azaldıkça aynı 10un kaynak ceza riski büyüyor', () => {
+  const { bot, right, game } = setup()
+  right.opened = false
+  bot.hand = [normal('blue', 10, 1, 'phase-risk-10')]
+
+  game.stock = Array(20).fill(null)
+  const early = T.botV1.highDiscardSourcePenaltyRisk(
+    bot.hand[0],
+    T.getBotContext(bot)
+  )
+
+  game.stock = Array(4).fill(null)
+  const late = T.botV1.highDiscardSourcePenaltyRisk(
+    bot.hand[0],
+    T.getBotContext(bot)
+  )
+
+  assert(early > 0)
+  assert(late > early)
+})
+
+test('V1 yüksek discard güvenliği: public destek taşları görünür oldukça servis riskini düşürüyor', () => {
+  const { bot, right, game } = setup()
+  game.stock = Array(20).fill(null)
+  right.opened = false
+  const risky = normal('red', 10, 1, 'visible-risk-red-10')
+  bot.hand = [risky]
+
+  const openContext = T.getBotContext(bot)
+  const openRisk = T.botV1.highDiscardSourcePenaltyRisk(risky, openContext)
+
+  const blockedContext = {
+    ...openContext,
+    knownVisibleTiles: [
+      ...openContext.knownVisibleTiles,
+      normal('red', 10, 2, 'visible-twin-10'),
+      normal('blue', 10, 1, 'visible-blue-10-a'),
+      normal('blue', 10, 2, 'visible-blue-10-b'),
+      normal('black', 10, 1, 'visible-black-10-a'),
+      normal('black', 10, 2, 'visible-black-10-b'),
+      normal('yellow', 10, 1, 'visible-yellow-10-a'),
+      normal('yellow', 10, 2, 'visible-yellow-10-b'),
+      normal('red', 8, 1, 'visible-red-8-a'), normal('red', 8, 2, 'visible-red-8-b'),
+      normal('red', 9, 1, 'visible-red-9-a'), normal('red', 9, 2, 'visible-red-9-b'),
+      normal('red', 11, 1, 'visible-red-11-a'), normal('red', 11, 2, 'visible-red-11-b'),
+      normal('red', 12, 1, 'visible-red-12-a'), normal('red', 12, 2, 'visible-red-12-b'),
+    ],
+  }
+  const blockedRisk = T.botV1.highDiscardSourcePenaltyRisk(risky, blockedContext)
+
+  assert(openRisk > blockedRisk)
+})
+
+test('V1 yüksek discard güvenliği: yalnız 8-13 kaldıysa kilitlenmeyip en düşük riskliyi atıyor', () => {
+  const { bot, right, game } = setup()
+  game.stock = Array(20).fill(null)
+  right.opened = false
+  bot.hand = [
+    normal('red', 8, 1, 'only-high-8'),
+    normal('blue', 10, 1, 'only-high-10'),
+    normal('black', 13, 1, 'only-high-13'),
+  ]
+
+  const discard = T.botV1.chooseDiscard(T.getBotContext(bot))
+  assert(discard)
+  assert.strictEqual(discard.id, 'only-high-8')
+})
+
 let passed = 0
 const failures = []
 

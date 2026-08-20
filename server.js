@@ -4293,9 +4293,13 @@ function botDiscard(player, tileId) {
     }
   }
 
+  const discardedRealJoker = !willFinish && isRealJoker(tile, game.joker)
   const discardWasPlayable = !willFinish && canAddToAnyMeld(tile)
 
-  if (discardWasPlayable) {
+  // Gerçek okey normal discard edildiğinde tek ceza uygulanır. Okey aynı
+  // zamanda açık perlere işlenebilir görünse bile +101'i ikinci kez
+  // "işlek taş" cezası olarak yazmayız.
+  if (discardWasPlayable && !discardedRealJoker) {
     addPenalty(
       player,
       101,
@@ -4303,7 +4307,7 @@ function botDiscard(player, tileId) {
     )
   }
 
-  if (!willFinish && isRealJoker(tile, game.joker)) {
+  if (discardedRealJoker) {
     addPenalty(
       player,
       101,
@@ -5603,10 +5607,13 @@ io.on('connection', socket => {
     }
 
     // Atılan taş masadaki bir pere işlenebiliyorsa +101.
-    // Bitiş taşı bu cezadan muaftır.
+    // Bitiş taşı bu cezadan muaftır. Gerçek okey normal discard edildiğinde
+    // ise yalnız "okey discard" cezası uygulanır; aynı taş için ayrıca
+    // işlek +101 yazılmaz.
+    const discardedRealJoker = !willFinish && isRealJoker(tile, game.joker)
     const discardWasPlayable = !willFinish && canAddToAnyMeld(tile)
 
-    if (discardWasPlayable) {
+    if (discardWasPlayable && !discardedRealJoker) {
       addPenalty(
         current,
         101,
@@ -5616,7 +5623,7 @@ io.on('connection', socket => {
 
     // Okeyi normal discard olarak atmak +101 ceza.
     // Okeyle BİTİŞ özel puanlamaya tabidir, burada ayrıca +101 eklenmez.
-    if (!willFinish && isRealJoker(tile, game.joker)) {
+    if (discardedRealJoker) {
       addPenalty(
         current,
         101,
@@ -5731,12 +5738,9 @@ app.get('/', (req, res) => {
 // =====================================================
 
 if (require.main === module) {
-  const PORT = process.env.PORT || 3000
-
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`)
+  server.listen(PORT, () => {
+    console.log(`Okey 101 server: http://localhost:${PORT}`)
   })
-
 }
 
 // Saf kural fonksiyonlarını test edebilmek için export ediyoruz.

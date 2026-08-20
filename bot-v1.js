@@ -847,11 +847,53 @@ const BOT_SEAT_ORDER = [
   'player-left',
 ]
 
+function visibleEffectiveIdentityCount(context, color, number) {
+  let count = 0
+  for (const visible of context?.knownVisibleTiles || []) {
+    const effective = context?.rules?.getEffectiveTile?.(visible)
+    if (!effective || effective.wildcard) continue
+    if (effective.color === color && Number(effective.number) === Number(number)) {
+      count++
+    }
+  }
+  return count
+}
+
+function unseenEffectiveCopies(context, color, number) {
+  if (!color || number < 1 || number > 13) return 0
+  return Math.max(0, 2 - visibleEffectiveIdentityCount(context, color, number))
+}
+
+function highDiscardSupportAvailability(tile, context) {
+  const effective = context?.rules?.getEffectiveTile?.(tile)
+  if (!effective || effective.wildcard) return 0
+
+  let unseen = 0
+  let total = 0
+
+  // Aynı sayının diğer renkleri: set açılışında bu discardı değerli yapabilir.
+  for (const color of context?.rules?.colors || DEFAULT_COLORS) {
+    if (color === effective.color) continue
+    unseen += unseenEffectiveCopies(context, color, effective.number)
+    total += 2
+  }
+
+  // Aynı rengin yakın komşuları: özellikle +/-1, sonra +/-2 run desteğidir.
+  for (const [distance, weight] of [[1, 1.35], [2, 0.65]]) {
+    for (const number of [effective.number - distance, effective.number + distance]) {
+      if (number < 1 || number > 13) continue
+      unseen += unseenEffectiveCopies(context, effective.color, number) * weight
+      total += 2 * weight
+    }
+  }
+
+  return total > 0 ? unseen / total : 0
+}
+
 function highDiscardSourcePenaltyRisk(tile, context) {
-  // Yandan alınan taşla ilk açılışta kaynak oyuncuya sayı x10 cezası yazılıyor.
-  // Bot bu yüzden özellikle 10-13 gibi pahalı taşları, sıradaki oyuncu henüz
-  // açmamışken gereksiz yere servis etmesin. Yasak değil: taş yapısal olarak
-  // gerçekten ölüyse yine atılabilir, sadece karar maliyeti yükselir.
+  // Yandan alınan taş ilk açılışta kullanılırsa kaynak oyuncuya sayı x10 ceza
+  // yazılıyor. Bu yüzden 8-13, sıradaki rakip henüz açmamışken yalnızca
+  // "yüksek elde cezası" değil gerçek bir servis riski olarak değerlendirilir.
   if (!(Number(context?.stockCount) > 0)) return 0
 
   const seatIndex = BOT_SEAT_ORDER.indexOf(context?.player?.seat)
@@ -862,23 +904,102 @@ function highDiscardSourcePenaltyRisk(tile, context) {
     player => player?.seat === receiverSeat
   )
 
+  // Rakip daha önce açtıysa bu yandan alış artık kaynak x10 cezasını doğurmaz.
   if (!receiver || receiver.opened) return 0
 
   const effective = context?.rules?.getEffectiveTile?.(tile)
   if (!effective || effective.wildcard) return 0
 
   const number = Number(effective.number) || 0
-  if (number < 9) return 0
+  if (number < 8 || number > 13) return 0
 
-  const riskByNumber = {
-    9: 12,
-    10: 22,
-    11: 36,
-    12: 54,
-    13: 76,
+  const stockCount = Math.max(0, Number(context?.stockCount) || 0)
+  let phaseFactor = 1.05
+  if (stockCount <= 2) phaseFactor = 1.5
+  else if (stockCount <= 6) phaseFactor = 1.38
+  else if (stockCount <= 12) phaseFactor = 1.25
+  else if (stockCount <= 20) phaseFactor = 1.12
+
+  // Public bilgide destek taşlarının çoğu hâlâ görünmüyorsa rakibin bu taşı
+  // ilk açılışında kullanabilme ihtimali daha yüksek kabul edilir. Bu gizli el
+  // okumak değildir; yalnız masada herkesin gördüğü fiziksel taşları kullanır.
+  const supportAvailability = highDiscardSupportAvailability(tile, context)
+  const availabilityFactor = 0.82 + (Math.max(0, Math.min(1, supportAvailability)) * 0.33)
+
+  // Aynı fiziksel/effective taşın diğer kopyası görünmüyorsa çift açılış
+  // ihtimaline küçük ama anlamlı bir ek risk verilir.
+  const twinUnseen = unseenEffectiveCopies(
+    context,
+    effective.color,
+    effective.number
+  ) > 0
+  const pairOpeningRisk = twinUnseen ? number * 2.5 : 0
+
+  // 11-13 özellikle pahalı servislerdir; baz x10 cezanın üstünde ek koruma.
+  const veryHighPremium = number >= 11 ? (number - 10) * 10 : 0
+
+  return (
+    (number * 10 * phaseFactor * availabilityFactor) +
+    pairOpeningRisk +
+    veryHighPremium
+  )
+}
+
+function completeMeldTileIds(hand, rules) {
+  const protectedIds = new Set()
+  const tiles = stableTiles(hand)
+  const records = []
+  const colorsByNumber = new Map()
+  const numbersByColor = new Map()
+  let wildcardCount = 0
+
+  for (const tile of tiles) {
+    const effective = rules.getEffectiveTile(tile)
+    if (!effective) continue
+    if (effective.wildcard) {
+      wildcardCount++
+      protectedIds.add(tile.id)
+      continue
+    }
+
+    records.push({ tile, effective })
+
+    const colors = colorsByNumber.get(effective.number) || new Set()
+    colors.add(effective.color)
+    colorsByNumber.set(effective.number, colors)
+
+    const numbers = numbersByColor.get(effective.color) || new Set()
+    numbers.add(effective.number)
+    numbersByColor.set(effective.color, numbers)
   }
 
-  return riskByNumber[number] || 0
+  // Bu yalnız discard koruması için hızlı bir yapısal testtir. Normal legality
+  // yine server validatorlarından geçer. Amaç tamamlanmış 3+ perin taşlarını,
+  // yüksek discard riskini hesaplarken gereksiz yere parçalamamaktır.
+  for (const { tile, effective } of records) {
+    const sameNumberColors = colorsByNumber.get(effective.number) || new Set()
+    if (sameNumberColors.size + wildcardCount >= 3) {
+      protectedIds.add(tile.id)
+      continue
+    }
+
+    const sameColorNumbers = numbersByColor.get(effective.color) || new Set()
+    const minStart = Math.max(1, effective.number - 2)
+    const maxStart = Math.min(effective.number, 11)
+
+    for (let start = minStart; start <= maxStart; start++) {
+      let missing = 0
+      for (let number = start; number <= start + 2; number++) {
+        if (!sameColorNumbers.has(number)) missing++
+      }
+      if (missing <= wildcardCount) {
+        protectedIds.add(tile.id)
+        break
+      }
+    }
+  }
+
+  return protectedIds
 }
 
 function chooseDiscard(context) {
@@ -887,9 +1008,12 @@ function chooseDiscard(context) {
   if (hand.length === 0) return null
   if (hand.length === 1) return hand[0]
 
+  const completeMeldIds = completeMeldTileIds(hand, rules)
   const ranked = hand.map(tile => {
+    const sourcePenaltyRisk = highDiscardSourcePenaltyRisk(tile, context)
     let keepScore = structuralKeepScore(tile, hand, rules)
-    keepScore += highDiscardSourcePenaltyRisk(tile, context)
+    keepScore += sourcePenaltyRisk
+    if (completeMeldIds.has(tile.id)) keepScore += 180
 
     // Normally this situation should already have been consumed by
     // chooseNextTableAction; the extra protection makes the discard policy
@@ -908,14 +1032,26 @@ function chooseDiscard(context) {
     return {
       tile,
       keepScore,
+      sourcePenaltyRisk,
       penaltyValue: Number(rules.tilePenaltyValue?.(tile)) || 0,
     }
   })
 
   ranked.sort((a, b) => {
     if (a.keepScore !== b.keepScore) return a.keepScore - b.keepScore
-    // Equally useless tiles: discard the higher hand-penalty value first.
-    if (b.penaltyValue !== a.penaltyValue) return b.penaltyValue - a.penaltyValue
+
+    // Eşit yapısal değerde ve kaynak-ceza riski aktifken güvenli olan düşük
+    // taşı önce çıkar. Risk yoksa eski davranış korunur: elde daha pahalı taşı
+    // atarak kendi round-sonu cezasını azaltır.
+    if (a.sourcePenaltyRisk !== b.sourcePenaltyRisk) {
+      return a.sourcePenaltyRisk - b.sourcePenaltyRisk
+    }
+    if (a.sourcePenaltyRisk > 0 && b.sourcePenaltyRisk > 0) {
+      if (a.penaltyValue !== b.penaltyValue) return a.penaltyValue - b.penaltyValue
+    }
+    else if (b.penaltyValue !== a.penaltyValue) {
+      return b.penaltyValue - a.penaltyValue
+    }
     return compareTileId(a.tile, b.tile)
   })
 
@@ -944,4 +1080,5 @@ module.exports = {
   findPairPlan,
   structuralKeepScore,
   highDiscardSourcePenaltyRisk,
+  completeMeldTileIds,
 }

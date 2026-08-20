@@ -2528,6 +2528,13 @@ function applyPickedDiscardSourcePenalty(player, usedTile, multiplier = 1) {
     return
   }
 
+  // Gerçek okey kendi discard anında zaten sabit +101 ceza yazar. O okeyi
+  // yandaki oyuncu daha sonra ilk açılışında kullansa bile atan kişiye
+  // sayı x10 / çift açılışı x20 kaynak cezası ikinci kez uygulanmaz.
+  if (isRealJoker(usedTile, game.joker)) {
+    return
+  }
+
   const value = tileVisibleNumber(usedTile, game.joker)
   const safeMultiplier = Math.max(1, Number(multiplier) || 1)
 
@@ -4293,7 +4300,8 @@ function botDiscard(player, tileId) {
     }
   }
 
-  const discardedRealJoker = !willFinish && isRealJoker(tile, game.joker)
+  const isDiscardingRealJoker = isRealJoker(tile, game.joker)
+  const discardedRealJoker = !willFinish && isDiscardingRealJoker
   const discardWasPlayable = !willFinish && canAddToAnyMeld(tile)
 
   // Gerçek okey normal discard edildiğinde tek ceza uygulanır. Okey aynı
@@ -4311,13 +4319,15 @@ function botDiscard(player, tileId) {
     addPenalty(
       player,
       101,
-      'Okeyi normal discard etme'
+      'Okey attı'
     )
   }
 
   player.hand.splice(index, 1)
   game.discardPile.push(tile)
-  emitGameSfx('discard', { sourceSeat: player.seat })
+  emitGameSfx(isDiscardingRealJoker ? 'okey-discard' : 'discard', {
+    sourceSeat: player.seat,
+  })
   game.lastDiscardOwnerId = player.id
   game.lastDiscardOwnerSeat = player.seat
   game.lastDiscardWasPlayable = Boolean(discardWasPlayable)
@@ -5610,7 +5620,8 @@ io.on('connection', socket => {
     // Bitiş taşı bu cezadan muaftır. Gerçek okey normal discard edildiğinde
     // ise yalnız "okey discard" cezası uygulanır; aynı taş için ayrıca
     // işlek +101 yazılmaz.
-    const discardedRealJoker = !willFinish && isRealJoker(tile, game.joker)
+    const isDiscardingRealJoker = isRealJoker(tile, game.joker)
+    const discardedRealJoker = !willFinish && isDiscardingRealJoker
     const discardWasPlayable = !willFinish && canAddToAnyMeld(tile)
 
     if (discardWasPlayable && !discardedRealJoker) {
@@ -5627,13 +5638,15 @@ io.on('connection', socket => {
       addPenalty(
         current,
         101,
-        'Okeyi normal discard etme'
+        'Okey attı'
       )
     }
 
     current.hand.splice(index, 1)
     game.discardPile.push(tile)
-    emitGameSfx('discard', { sourceSeat: current.seat })
+    emitGameSfx(isDiscardingRealJoker ? 'okey-discard' : 'discard', {
+      sourceSeat: current.seat,
+    })
     game.lastDiscardOwnerId = current.id
     game.lastDiscardOwnerSeat = current.seat
     game.lastDiscardWasPlayable = Boolean(discardWasPlayable)
